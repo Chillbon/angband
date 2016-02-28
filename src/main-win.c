@@ -677,8 +677,14 @@ static void save_prefs_aux(term_data *td, const char *sec_name)
 	WritePrivateProfileString(sec_name, "Visible", buf, ini_file);
 
 	/* Font */
-	strcpy(buf, td->font_file ? td->font_file : DEFAULT_FONT);
+	strcpy(buf, td->lf.lfFaceName[0]!='\0' ? td->lf.lfFaceName : "Courier");
 	WritePrivateProfileString(sec_name, "Font", buf, ini_file);
+    wsprintf(buf, "%d", td->lf.lfWidth);
+    WritePrivateProfileString(sec_name, "FontWid", buf, ini_file);
+    wsprintf(buf, "%d", td->lf.lfHeight);
+    WritePrivateProfileString(sec_name, "FontHgt", buf, ini_file);
+    wsprintf(buf, "%d", td->lf.lfWeight);
+    WritePrivateProfileString(sec_name, "FontWgt", buf, ini_file);        
 
 	/* Bizarre */
 	strcpy(buf, td->bizarre ? "1" : "0");
@@ -789,8 +795,16 @@ static void load_prefs_aux(term_data *td, const char *sec_name)
 	td->bizarre = (GetPrivateProfileInt(sec_name, "Bizarre", TRUE,
 										ini_file) != 0);
 
-	/* Analyze font, save desired font name */
-	td->font_want = string_make(analyze_font(tmp, &wid, &hgt));
+    /* Analyze font, save desired font name */
+    td->font_want = string_make(tmp);
+    hgt = 15; wid = 0;
+    td->lf.lfWidth  = GetPrivateProfileInt(sec_name, "FontWid", wid, ini_file);
+    td->lf.lfHeight = GetPrivateProfileInt(sec_name, "FontHgt", hgt, ini_file);
+    td->lf.lfWeight = GetPrivateProfileInt(sec_name, "FontWgt", 0, ini_file);
+
+    /* Tile size */
+    td->tile_wid = GetPrivateProfileInt(sec_name, "TileWid", td->lf.lfWidth, ini_file);
+    td->tile_hgt = GetPrivateProfileInt(sec_name, "TileHgt", td->lf.lfHeight, ini_file);	
 
 	/* Tile size */
 	td->tile_wid = GetPrivateProfileInt(sec_name, "TileWid", wid, ini_file);
@@ -1275,8 +1289,7 @@ static void term_remove_font(const char *name)
 	return;
 }
 
-
-/**
+/*
  * Force the use of a new "font file" for a term_data
  *
  * This function may be called before the "window" is ready
@@ -1287,158 +1300,81 @@ static void term_remove_font(const char *name)
  */
 static errr term_force_font(term_data *td, const char *path)
 {
-	int i;
+    int wid, hgt;
 
-	int wid, hgt;
+    /* Forget the old font (if needed) */
+    if (td->font_id) DeleteObject(td->font_id);
 
-	char *base;
+    /* Unused */
+    (void)path;
 
-	char buf[1024];
+    /* Create the font (using the 'base' of the font file name!) */
+    td->font_id = CreateFontIndirect(&(td->lf));
+    wid = td->lf.lfWidth;
+    hgt = td->lf.lfHeight;
+    if (!td->font_id) return (1);
 
+    /* Hack -- Unknown size */
+    if (!wid || !hgt)
+    {
+        HDC hdcDesktop;
+        HFONT hfOld;
+        TEXTMETRIC tm;
 
-	/* Check we have a path */
-	if (!path) return (1);
+        /* all this trouble to get the cell size */
+        hdcDesktop = GetDC(HWND_DESKTOP);
+        hfOld = SelectObject(hdcDesktop, td->font_id);
+        GetTextMetrics(hdcDesktop, &tm);
+        SelectObject(hdcDesktop, hfOld);
+        ReleaseDC(HWND_DESKTOP, hdcDesktop);
 
+        /* Font size info */
+        wid = tm.tmAveCharWidth;
+        hgt = tm.tmHeight;
+    }
 
-	/* Forget the old font (if needed) */
-	if (td->font_id) DeleteObject(td->font_id);
+    /* Save the size info */
+    td->font_wid = wid;
+    td->font_hgt = hgt;
 
-	/* Forget old font */
-	if (td->font_file) {
-		bool used = FALSE;
-
-		/* Scan windows */
-		for (i = 0; i < MAX_TERM_DATA; i++) {
-			/* Check "screen" */
-			if ((td != &data[i]) && (data[i].font_file) &&
-			    (streq(data[i].font_file, td->font_file))) {
-				used = TRUE;
-			}
-		}
-
-		/* Remove unused font resources */
-		if (!used) term_remove_font(td->font_file);
-
-		/* Free the old name */
-		string_free(td->font_file);
-
-		/* Forget it */
-		td->font_file = NULL;
-	}
-
-
-
-	/* Local copy */
-	my_strcpy(buf, path, sizeof(buf));
-
-	/* Analyze font path */
-	base = analyze_font(buf, &wid, &hgt);
-
-	/* Verify suffix */
-	if (!suffix(base, ".FON")) return (1);
-
-	/* Verify file */
-	if (!file_exists(buf)) return (1);
-
-	/* Load the new font */
-	if (!AddFontResourceEx(buf, FR_PRIVATE, 0)) return (1);
-
-	/* Save new font name */
-	td->font_file = string_make(base);
-
-	/* Remove the "suffix" */
-	base[strlen(base)-4] = '\0';
-
-	/* Create the font (using the 'base' of the font file name!) */
-	td->font_id = CreateFont(hgt, wid, 0, 0, FW_DONTCARE, 0, 0, 0,
-	                         ANSI_CHARSET, OUT_DEFAULT_PRECIS,
-	                         CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
-	                         FIXED_PITCH | FF_DONTCARE, base);
-
-	/* Hack -- Unknown size */
-	if (!wid || !hgt)
-	{
-		HDC hdcDesktop;
-		HFONT hfOld;
-		TEXTMETRIC tm;
-
-		/* all this trouble to get the cell size */
-		hdcDesktop = GetDC(HWND_DESKTOP);
-		hfOld = SelectObject(hdcDesktop, td->font_id);
-		GetTextMetrics(hdcDesktop, &tm);
-		SelectObject(hdcDesktop, hfOld);
-		ReleaseDC(HWND_DESKTOP, hdcDesktop);
-
-		/* Font size info */
-		wid = tm.tmAveCharWidth;
-		hgt = tm.tmHeight;
-	}
-
-	/* Save the size info */
-	td->font_wid = wid;
-	td->font_hgt = hgt;
-
-	/* Success */
-	return (0);
+    /* Success */
+    return (0);
 }
 
 
 
-/**
+/*
  * Allow the user to change the font for this window.
  */
 static void term_change_font(term_data *td)
 {
-	OPENFILENAME ofn;
+    CHOOSEFONT cf;
 
-	char tmp[1024] = "";
+    memset(&cf, 0, sizeof(cf));
+    cf.lStructSize = sizeof(cf);
+    cf.Flags = CF_SCREENFONTS | CF_FIXEDPITCHONLY | CF_NOVERTFONTS | CF_INITTOLOGFONTSTRUCT;
+    cf.lpLogFont = &(td->lf);
 
-	/* Extract a default if possible */
-	if (td->font_file) strcpy(tmp, td->font_file);
+    if (ChooseFont(&cf))
+    {
+        /* Force the font */
+        term_force_font(td, NULL);
 
-	/* Ask for a choice */
-	memset(&ofn, 0, sizeof(ofn));
-	ofn.lStructSize = sizeof(ofn);
-	ofn.hwndOwner = data[0].w;
-	ofn.lpstrFilter = "Angband Font Files (*.fon)\0*.fon\0";
-	ofn.nFilterIndex = 1;
-	ofn.lpstrFile = tmp;
-	ofn.nMaxFile = 128;
-	ofn.lpstrInitialDir = ANGBAND_DIR_FONTS;
-	ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-	ofn.lpstrDefExt = "fon";
+        /* Assume not bizarre */
+        td->bizarre = TRUE;
 
-	/* Force choice if legal */
-	if (GetOpenFileName(&ofn)) {
-		/* Force the font */
-		if (term_force_font(td, tmp)) {
-			/* Access the standard font file */
-			path_build(tmp, sizeof(tmp), ANGBAND_DIR_FONTS, DEFAULT_FONT);
+        /* Reset the tile info */
+        td->tile_wid = td->font_wid;
+        td->tile_hgt = td->font_hgt;
 
-			/* Force the use of that font */
-			(void)term_force_font(td, tmp);
+        /* Analyze the font */
+        term_getsize(td);
 
-			/* Reset the tile info */
-			td->tile_wid = td->font_wid;
-			td->tile_hgt = td->font_hgt;
-		}
-
-		/* HACK - Assume bizarre */
-		td->bizarre = TRUE;
-
-		/* Reset the tile info */
-		if (!td->tile_wid || !td->tile_hgt) {
-			td->tile_wid = td->font_wid;
-			td->tile_hgt = td->font_hgt;
-		}
-
-		/* Analyze the font */
-		term_getsize(td);
-
-		/* Resize the window */
-		term_window_resize(td);
-	}
+        /* Resize the window */
+        term_window_resize(td);
+    }
 }
+
 
 
 static void windows_map_aux(void);
@@ -2623,24 +2559,14 @@ static void init_windows(void)
 	for (i = 0; i < MAX_TERM_DATA; i++) {
 		td = &data[i];
 
-		/* Access the standard font file */
-		path_build(buf, sizeof(buf), ANGBAND_DIR_FONTS, td->font_want);
-
-		/* Activate the chosen font */
-		if (term_force_font(td, buf)) {
-			/* Access the standard font file */
-			path_build(buf, sizeof(buf), ANGBAND_DIR_FONTS, DEFAULT_FONT);
-
-			/* Force the use of that font */
-			(void)term_force_font(td, buf);
-
-			/* Oops */
-			td->tile_wid = 8;
-			td->tile_hgt = 13;
-
-			/* HACK - Assume bizarre */
-			td->bizarre = TRUE;
-		}
+        strncpy(td->lf.lfFaceName, td->font_want, LF_FACESIZE);
+        td->lf.lfCharSet = DEFAULT_CHARSET;
+        td->lf.lfPitchAndFamily = FIXED_PITCH | FF_DONTCARE;
+        
+        /* Activate the chosen font */
+        term_force_font(td, NULL);
+        td->tile_wid = td->font_wid;
+        td->tile_hgt = td->font_hgt;
 
 		/* Analyze the font */
 		term_getsize(td);

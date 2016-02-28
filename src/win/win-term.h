@@ -93,6 +93,8 @@ struct _term_data
 	uint map_tile_hgt;
 
 	bool map_active;
+
+    LOGFONT lf;
 };
 
 
