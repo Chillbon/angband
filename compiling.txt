@@ -77,18 +77,9 @@ BUILDING ON WINDOWS
 Using MinGW
 -----------
 
-This build now also uses autotools, so should be very similar to the Linux
-build:
-
-	./autogen.sh
-	./configure --enable-win
-	make
-	
-The install target almost certainly won't work
-
-Following build, to get the program to run, you need to copy the executable
-from the src directory into the top-level dir, and copy 2 DLLs (libpng12.dll
-and zlib1.dll) from src/win/dll to the top-level dir 
+1. run msys.bat, e.g. "d:\MinGW\msys\1.0\msys.bat"
+2. in MSYS, goto angband/src, e.g. "/f/code/game/angband-4.0.4/src"
+3. run "make -f makefile.win MINGW=yes"
 
 
 Using Cygwin (with MinGW)
